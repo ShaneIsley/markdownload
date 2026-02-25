@@ -2,202 +2,324 @@
 
 ## Context
 
-This is a comprehensive code review of MarkDownload, a cross-platform browser extension (Firefox, Chrome, Edge, Safari) that clips web pages and converts them to Markdown. The extension is at version 3.4.0, uses Manifest V2, and is built with vanilla JavaScript — no bundler, no framework, no TypeScript.
+Comprehensive code review of MarkDownload v3.4.0, a cross-platform browser extension (Firefox, Chrome, Edge, Safari) that clips web pages and converts them to Markdown. Built with vanilla JavaScript on Manifest V2, no bundler, no framework, no TypeScript.
 
-The review identifies bugs, security issues, code quality gaps, and architectural concerns, then proposes concrete fixes.
+A previous review (commit 943b1fb) identified 5 critical bugs, a code injection issue, and several code quality gaps. Commit 560e491 applied fixes for the bugs. This review verifies those fixes, identifies remaining issues, and surfaces new findings.
 
 ---
 
 ## Architecture Overview
 
-The extension follows a standard WebExtension architecture:
+The extension follows standard WebExtension architecture:
 
-| Component | File | Role |
-|---|---|---|
-| Background | `src/background/background.js` (1027 lines) | Core conversion engine, download management, context menus |
-| Content script | `src/contentScript/contentScript.js` (171 lines) | DOM capture, selection extraction |
-| Popup | `src/popup/popup.js` (243 lines) | CodeMirror-based markdown preview/editor UI |
-| Options | `src/options/options.js` (313 lines) | Settings management with 30+ options |
-| Shared | `src/shared/default-options.js`, `context-menus.js` | Default config, menu creation |
+| Component | File | Lines | Role |
+|---|---|---|---|
+| Background | `src/background/background.js` | 1039 | Core conversion engine, download management, context menus |
+| Content script | `src/contentScript/contentScript.js` | 125 | DOM capture, selection extraction, clipboard/download helpers |
+| Page context | `src/contentScript/pageContext.js` | 11 | MathJax 3 LaTeX extraction (runs in page context) |
+| Popup | `src/popup/popup.js` | 247 | CodeMirror-based markdown preview/editor UI |
+| Options | `src/options/options.js` | 317 | Settings management with 30+ configurable options |
+| Shared config | `src/shared/default-options.js` | 41 | Default option values and `getOptions()` utility |
+| Shared menus | `src/shared/context-menus.js` | 174 | Context menu creation (20+ items) |
 
-External libraries are vendored directly (no npm): Readability.js v0.5.0, Turndown v7.1.3, Moment.js v2.29.4, CodeMirror, browser-polyfill.
+External libraries are vendored directly (no npm runtime dependencies): Readability.js v0.5.0, Turndown v7.1.3, Turndown GFM plugin, Moment.js v2.29.4, CodeMirror, browser-polyfill.
+
+### Data Flow
+
+```
+User clicks extension icon
+  → Popup (popup.js) opens, injects content script
+    → Content script captures DOM + selection
+      → Background receives HTML via message passing
+        → Readability.js extracts article content
+          → Turndown converts HTML → Markdown (with custom rules for images, links, math, code)
+            → Template variables substituted (front/back matter, date, keywords)
+              → Popup displays editable Markdown in CodeMirror
+                → User downloads (.md file) or copies to clipboard
+```
 
 ---
 
-## Critical Bugs
+## Previously Reported Bugs — All FIXED
 
-### 1. `this` context error in `textReplace()` — `background.js:269`
+These bugs were identified in the initial review and fixed in commit 560e491:
+
+### 1. `this` context in `textReplace()` — FIXED
+`this.generateValidFileName(...)` → `generateValidFileName(...)` at line 269.
+
+### 2. `this.getOptions()` in `notify()` — FIXED
+`this.getOptions()` → `getOptions()` at line 544.
+
+### 3. Selection loop index in `getHTMLOfSelection()` — FIXED
+`getRangeAt(0)` → `getRangeAt(i)` at contentScript.js:84.
+
+### 4. Inverted URL logic in `validateUri()` — FIXED
+Condition now correctly reads `(baseUri.href.endsWith('/') ? '' : '/')` at line 227.
+
+### 5. `forEach` with async callbacks — FIXED
+Changed to `for...of` loop with `await` at line 464.
+
+### 6. Typo "Downloas" → "Downloads" — FIXED
+Corrected at options.js:106.
+
+---
+
+## New Bugs Found
+
+### 7. Dead code: `notifyExtension()` references undefined variable — `contentScript.js:1-4`
 
 ```js
-if (s && disallowedChars) s = this.generateValidFileName(s, disallowedChars);
+function notifyExtension() {
+    browser.runtime.sendMessage({ type: "clip", dom: content});
+}
 ```
 
-`textReplace()` is a plain function, not a method on an object. In strict mode `this` is `undefined`; in sloppy mode it falls through to the global `window` object where `generateValidFileName` happens to exist. This is fragile and will break under strict mode or if the function is ever moved/refactored.
+`content` is never declared in this file. The function is also never called (confirmed by ESLint: `'notifyExtension' is defined but never used`). This is dead code that should be removed.
 
-**Fix:** Replace `this.generateValidFileName(...)` with `generateValidFileName(...)`.
-
-### 2. `this.getOptions()` in `notify()` — `background.js:537`
+### 8. `removeHiddenNodes` filter returns `undefined` for visible nodes — `contentScript.js:51-63`
 
 ```js
-async function notify(message) {
-  const options = await this.getOptions();
-```
-
-Same issue — `notify` is registered via `browser.runtime.onMessage.addListener(notify)`. The `this` binding is unreliable. Works only because `getOptions` is on the global scope in non-strict mode.
-
-**Fix:** Replace `this.getOptions()` with `getOptions()`.
-
-### 3. Selection loop bug in `getHTMLOfSelection()` — `contentScript.js:84`
-
-```js
-for (let i = 0; i < selection.rangeCount; i++) {
-    range = selection.getRangeAt(0);  // <-- BUG: always index 0, not i
-```
-
-Multi-range selections (e.g. Ctrl+click in Firefox) will always clone the first range, repeating it `rangeCount` times instead of capturing each distinct range.
-
-**Fix:** Change `getRangeAt(0)` to `getRangeAt(i)`.
-
-### 4. Inverted URL logic in `validateUri()` — `background.js:227`
-
-```js
-href = baseUri.href + (baseUri.href.endsWith('/') ? '/' : '') + href
-```
-
-When the base URI already ends with `/`, this adds _another_ `/`, producing double-slashes. When it _doesn't_ end with `/`, no separator is added, jamming the path segments together.
-
-**Fix:** Invert the condition: `(baseUri.href.endsWith('/') ? '' : '/')`.
-
-### 5. `async` callbacks inside `forEach` — `background.js:462-472`
-
-```js
-Object.entries(imageList).forEach(async ([src, filename]) => {
-    const imgId = await browser.downloads.download({...})
-    ...
+nodeIterator = document.createNodeIterator(root, NodeFilter.SHOW_ELEMENT, function(node) {
+    let nodeName = node.nodeName.toLowerCase();
+    if (nodeName === "script" || ...) return NodeFilter.FILTER_REJECT;
+    if (node.offsetParent === void 0) return NodeFilter.FILTER_ACCEPT;
+    let computedStyle = window.getComputedStyle(node, null);
+    if (computedStyle.getPropertyValue("visibility") === "hidden" || ...) return NodeFilter.FILTER_ACCEPT;
+    // ← No return statement for visible nodes — returns undefined
 });
 ```
 
-`forEach` doesn't await async callbacks — all downloads fire concurrently with no error propagation. If any download fails, the error is silently lost.
+Two issues:
+1. **Missing return for visible nodes.** The NodeFilter spec requires returning `FILTER_ACCEPT`, `FILTER_REJECT`, or `FILTER_SKIP`. Returning `undefined` works by accident (treated as falsy / reject) but is technically undefined behavior.
+2. **`offsetParent === void 0`** checks for `undefined`, but `offsetParent` returns `null` for elements with `display: none` or elements not in the DOM. This check never matches and is dead code. The subsequent `computedStyle` check catches `display: none` anyway, so there's no functional gap.
 
-**Fix:** Use a `for...of` loop with `await`, or `Promise.all()` with `.map()`.
+**Fix:** Add `return NodeFilter.FILTER_SKIP;` at the end. Remove or fix the `offsetParent` check.
+
+### 9. Missing `const`/`let` in `for...of` loop — `pageContext.js:6`
+
+```js
+for (math of MathJax.startup.document.math)
+```
+
+`math` is an implicit global variable. Should be `for (const math of ...)`. In strict mode, this would throw a ReferenceError.
+
+### 10. Unused `options` variable in `notify()` — `background.js:544`
+
+```js
+async function notify(message) {
+  const options = await getOptions();  // ← fetched but never used
+  if (message.type === "clip") {
+    // ...uses getArticleFromDom, convertArticleToMarkdown, etc.
+    // Each function fetches options internally. options is never referenced.
+  }
+```
+
+This is wasted work — `getOptions()` hits `browser.storage.sync.get()` on every message, even though the result is discarded. Either remove it or pass it to the functions that need it (to avoid redundant storage reads).
+
+### 11. Unused `folderSeparator` variable — `background.js:959-965`
+
+```js
+const platformOS = navigator.platform;
+var folderSeparator = "";
+if(platformOS.indexOf("Win") === 0){
+    folderSeparator = "\\";
+}else{
+    folderSeparator = "/";
+}
+```
+
+`folderSeparator` is computed but never used anywhere in `copyMarkdownFromContext()`. Additionally, `navigator.platform` is deprecated. This entire block is dead code.
+
+### 12. `selectedText` variable in popup — `popup.js:3`
+
+```js
+var selectedText = null;
+```
+
+Assigned but never read. Dead code.
 
 ---
 
 ## Security Issues
 
-### 6. Code injection via `executeScript` string interpolation — HIGH
+### 13. Code injection via `executeScript` string interpolation — MEDIUM
 
-Multiple locations construct JavaScript code strings with unsanitized values:
+Multiple locations construct JavaScript code strings passed to `browser.tabs.executeScript()`:
 
-- **`background.js:874`**: `copyToClipboard("[${title}](${article.baseURI})")` — if `title` contains a `"` or `)`, the generated code breaks or could execute unintended JS.
-- **`background.js:502`**: `downloadMarkdown("${filename}","${base64EncodeUnicode(markdown)}")` — `filename` could contain quotes.
-- **`background.js:964`**: `copyToClipboard("![](${info.srcUrl})")` — `srcUrl` from browser API, but still unescaped.
-- **`background.js:903`, `933`**: `copyToClipboard(${JSON.stringify(markdown)})` — these use `JSON.stringify()` which is safer.
+| Location | Code Pattern | Mitigation |
+|---|---|---|
+| `background.js:886` | `copyToClipboard(${JSON.stringify(markdownLink)})` | JSON.stringify ✓ |
+| `background.js:509` | `downloadMarkdown(${JSON.stringify(filename)},${JSON.stringify(...)})` | JSON.stringify ✓ |
+| `background.js:914,944` | `copyToClipboard(${JSON.stringify(markdown)})` | JSON.stringify ✓ |
+| `background.js:972,976` | `copyToClipboard(${JSON.stringify(...)})` | JSON.stringify ✓ |
+| `background.js:675` | `typeof getSelectionAndDom === 'function'` | Static string ✓ |
 
-**Fix:** Use `JSON.stringify()` consistently for all interpolated values, or better yet, use message passing (`browser.tabs.sendMessage`) instead of `executeScript` with code strings.
+**Status:** All `executeScript` calls now use `JSON.stringify()` consistently, which provides strong escaping. The risk is significantly reduced from the initial review. However, `executeScript` with code strings remains an inherently fragile pattern — any future contributor who forgets `JSON.stringify` opens a code injection vector.
 
-### 7. Overly broad `<all_urls>` permission
+**Recommended long-term fix:** Replace `executeScript({code: ...})` with `browser.tabs.sendMessage()` to pass data via message passing instead of code construction. This eliminates the attack surface entirely.
 
-The `<all_urls>` permission in `manifest.json:16` gives the extension access to every website. This is used for the "Download All Tabs" feature. Consider whether `activeTab` alone would suffice for most users, with `<all_urls>` as an optional permission.
+### 14. Obsidian URIs not URL-encoded — `background.js:986,996`
+
+```js
+await chrome.tabs.update({url: "obsidian://advanced-uri?vault=" + obsidianVault +
+    "&clipboard=true&mode=new&filepath=" + obsidianFolder + generateValidFileName(title)});
+```
+
+`obsidianVault`, `obsidianFolder`, and `title` are user-controlled strings concatenated into a URI without `encodeURIComponent()`. Special characters in vault names or folder paths (spaces, `&`, `=`, `#`) will break the URI or be misinterpreted as parameter delimiters.
+
+**Fix:**
+```js
+const params = new URLSearchParams({
+    vault: obsidianVault,
+    clipboard: "true",
+    mode: "new",
+    filepath: obsidianFolder + generateValidFileName(title)
+});
+await chrome.tabs.update({url: `obsidian://advanced-uri?${params}`});
+```
+
+### 15. Overly broad `<all_urls>` permission — `manifest.json:16`
+
+Grants access to every website. Required for "Download All Tabs" and content script injection, but most users only clip the active tab. Consider making it an optional permission and requesting it on demand.
 
 ---
 
 ## Code Quality Issues
 
-### 8. No test suite
+### 16. No test suite — 0% coverage
 
-There are zero tests — no test files, no testing framework, no CI/CD pipeline for automated testing. For an extension with thousands of users across 4 browser stores, this is a significant gap.
+No test files, no test framework, no CI/CD testing pipeline. The 5 critical bugs found in the initial review all would have been caught by basic unit tests.
 
-**Recommendation:** Add a test framework (e.g. Jest or Vitest) and cover the core conversion pipeline (`turndown()`, `textReplace()`, `validateUri()`, `generateValidFileName()`).
+**Critical untested functions:**
+- `validateUri()` — URL resolution logic
+- `textReplace()` — template variable substitution with 10+ transformation modes
+- `generateValidFileName()` — file name sanitization
+- `turndown()` — custom Markdown conversion rules
+- `getArticleFromDom()` — DOM parsing, math extraction, code block detection
+- `preDownloadImages()` — async image download coordination
 
-### 9. No linting configuration
+### 17. ESLint configured but not enforced — 63 warnings
 
-No ESLint, Prettier, or any static analysis tool is configured. This allows the inconsistencies listed below to accumulate.
+ESLint is configured (`.eslintrc.json`) but:
+- No `lint` script in `package.json`
+- No pre-commit hooks
+- No CI/CD workflow to enforce
+- All rules set to `warn` (not `error`)
+- 63 active warnings across the codebase
 
-### 10. Inconsistent equality operators
+**Current ESLint warnings breakdown:**
 
-The codebase uses loose equality (`==`) everywhere instead of strict equality (`===`). Over 30 instances in `background.js` alone. Examples:
-- `node.nodeName == 'IMG'` (line 31)
-- `message.type == "clip"` (line 539)
-- `delta.state.current == "complete"` (line 515)
+| Category | Count | Example |
+|---|---|---|
+| `no-var` (use `let`/`const`) | 20 | `var range`, `var selection`, `var div` |
+| `prefer-const` | 17 | `let imageList = {}`, `let src = ...` |
+| `no-unused-vars` | 7 | `notifyExtension`, `selectedText`, `folderSeparator` |
+| `eqeqeq` (`!=` → `!==`) | 4 | `popup.js:19,22,185`, `options.js:180` |
 
-### 11. Silent error swallowing — 10+ empty catch blocks
+**Recommended fixes:**
+1. Add `"lint": "eslint src/"` to `package.json` scripts
+2. Promote rules from `warn` to `error`
+3. Run `eslint --fix` to auto-fix the 45 fixable warnings
+4. Fix remaining 18 manually
 
-Multiple `catch { }` blocks with no logging:
-- `background.js:306, 646, 657`
-- `popup.js:67, 85`
-- `options/options.js:54, 63`
-- `context-menus.js:62`
+### 18. Manifest V2 deprecation
 
-These make debugging extremely difficult.
+Chrome has been deprecating Manifest V2. Key migration items:
 
-### 12. Dead code in `contentScript.js:120-164`
+| MV2 | MV3 Equivalent |
+|---|---|
+| `"manifest_version": 2` | `"manifest_version": 3` |
+| `background.scripts` | `background.service_worker` |
+| `browser_action` | `action` |
+| `tabs.executeScript({code:...})` | `scripting.executeScript({func:...})` |
+| `<all_urls>` in `permissions` | Move to `host_permissions` |
 
-The `downloadImage()` function contains three commented-out approaches (CORS link, XHR, canvas) and has no working implementation — the function body does nothing. It should be removed.
+The `executeScript` migration to MV3's `scripting.executeScript({func:...})` would also eliminate the code injection concern (issue #13) since MV3 requires passing function references, not code strings.
 
-### 13. Typo in options.js:102
+### 19. Moment.js is 72KB of dead weight
+
+Moment.js (v2.29.4, 72KB minified) is used solely for date formatting in template variables (`{date:FORMAT}`):
 
 ```js
-"The Downloas API is unavailable in this browser."
+const dateString = moment(now).format(format);  // background.js:292
 ```
 
-Should be "Downloads".
+Moment.js is in maintenance mode and the team recommends migration. Options:
+- **dayjs** (2KB, drop-in replacement, same `.format()` API)
+- **Native `Intl.DateTimeFormat`** (0KB, but different format syntax — would break existing user templates)
 
-### 14. `String.prototype.replaceAll` polyfill — `background.js:1014-1026`
+`dayjs` is the safest migration path. Saves ~70KB with no API changes.
 
-`replaceAll()` is supported in all current browsers (Chrome 85+, Firefox 77+, Safari 13.1+). Given the minimum Firefox version is 65, this polyfill may still be needed for edge cases, but it's worth evaluating whether to drop it.
+### 20. Repeated `getOptions()` calls
 
-### 15. Manifest V2 deprecation
+Many functions call `getOptions()` independently, resulting in redundant `browser.storage.sync.get()` calls per operation:
 
-Chrome has been migrating to Manifest V3 and has been deprecating MV2. Key differences:
-- `background.scripts` → `service_worker`
-- `browser.tabs.executeScript` → `scripting.executeScript`
-- `browser_action` → `action`
+```
+notify()        → getOptions() (unused result!)
+  → convertArticleToMarkdown() → getOptions()
+    → turndown()               (receives options as parameter ✓)
+  → formatTitle()              → getOptions()
+  → formatMdClipsFolder()      → getOptions()
+```
 
-This will require a significant rewrite eventually. Planning for it now would be wise.
-
-### 16. Moment.js is in maintenance mode
-
-Moment.js (v2.29.4) is a 72KB library used only for date formatting in template variables. The Moment team recommends migrating to lighter alternatives like `dayjs` (2KB, same API) or native `Intl.DateTimeFormat`.
+A single clip operation triggers 3-4 storage reads for the same data. Consider fetching options once at the top of the pipeline and threading them through.
 
 ---
 
-## Files to Modify
+## Files to Modify (Remaining Work)
 
 | File | Changes |
 |---|---|
-| `src/background/background.js` | Fix bugs #1, #2, #4, #5, #6; fix `==` to `===`; remove empty catches |
-| `src/contentScript/contentScript.js` | Fix bug #3 (getRangeAt); remove dead `downloadImage()` code |
-| `src/options/options.js` | Fix typo #13 |
-| `src/popup/popup.js` | Fix empty catch blocks |
-| `src/shared/context-menus.js` | Fix empty catch blocks |
+| `src/background/background.js` | Remove unused `options` fetch in `notify()` (line 544); remove dead `folderSeparator` block (lines 959-965); encode Obsidian URIs (lines 986, 996) |
+| `src/contentScript/contentScript.js` | Remove dead `notifyExtension()` (lines 1-4); fix `removeHiddenNodes` filter return value (line 63) |
+| `src/contentScript/pageContext.js` | Add `const` to `for...of` loop (line 6) |
+| `src/popup/popup.js` | Remove unused `selectedText` (line 3); fix `!=` → `!==` (lines 19, 22, 185) |
+| `src/options/options.js` | Fix `!=` → `!==` (line 180) |
+| All files | Run `eslint --fix` for `var` → `let`/`const` and `prefer-const` |
 
 ---
 
 ## Verification
 
-Since there is no test suite, verification must be manual:
+No automated test suite exists. Verification is manual:
 
-1. Load the extension in Firefox Developer Edition via `npm run start:firefoxdeveloper`
+1. Load extension in Firefox Developer Edition: `npm run start:firefoxdeveloper`
 2. Test core flows:
-   - Click extension icon on a Wikipedia page → verify markdown renders in popup
-   - Click "Download" → verify `.md` file downloads correctly
+   - Click extension icon on a Wikipedia page → verify Markdown renders in popup
+   - Click "Download" → verify `.md` file downloads with correct content
    - Select text → clip selection → verify only selected content appears
    - Right-click → context menu → "Copy Tab as Markdown" → paste and verify
-   - Test a page with relative URLs (e.g. internal wiki links) → verify links resolve correctly (validates bug #4 fix)
+   - Test a page with relative URLs (e.g., internal wiki links) → verify links resolve correctly
    - Test a page with MathJax → verify math renders as `$...$` / `$$...$$`
-3. Verify Obsidian integration (if vault configured)
-4. Test the options page — change settings and verify they persist
+   - Test Obsidian integration with vault names containing spaces
+3. Verify the options page — change settings and verify they persist
 
 ---
 
 ## Summary
 
-The extension is well-designed and feature-rich, with a clean separation of concerns between background, content, popup, and options scripts. The HTML→Markdown conversion pipeline (Readability → Turndown with custom rules) is sophisticated and handles edge cases like MathJax, code blocks, and image downloading well.
+### What's Good
 
-The main concerns are:
-- **5 concrete bugs** (3 involving incorrect `this`/index references, 1 inverted URL logic, 1 async race condition)
-- **Code injection risk** in `executeScript` string interpolation
-- **Zero test coverage** and no linting
-- **Manifest V2 deprecation** looming on Chrome
-- **Moment.js** adding unnecessary bundle weight
+- **Clean architecture.** Clear separation between background, content, popup, and options scripts. Each file has a well-defined responsibility.
+- **Powerful conversion pipeline.** Readability.js → Turndown with custom rules handles a wide range of web content including MathJax/KaTeX, fenced code blocks with language detection, and multiple image handling modes.
+- **Rich feature set.** Template variables, Obsidian integration, batch tab processing, context menus, keyboard shortcuts — impressive for ~1,400 lines of custom code.
+- **Previous critical bugs fixed.** All 5 bugs from the initial review have been correctly addressed.
+
+### What Needs Attention
+
+| Issue | Severity | Effort | Description |
+|---|---|---|---|
+| No test suite (#16) | **High** | High | 0% coverage; bugs go undetected until users report them |
+| Obsidian URI encoding (#14) | **Medium** | Low | Breaks for vault/folder names with special characters |
+| Dead code (#7, #10, #11, #12) | **Low** | Low | 4 instances of unused variables/functions |
+| 63 ESLint warnings (#17) | **Low** | Low | 45 auto-fixable; rest need manual cleanup |
+| `pageContext.js` implicit global (#9) | **Medium** | Trivial | Missing `const` in `for...of` loop |
+| Manifest V3 migration (#18) | **Medium** | High | Required for continued Chrome Web Store compliance |
+| Moment.js bundle size (#19) | **Low** | Low | 70KB savings by switching to dayjs |
+| `executeScript` code strings (#13) | **Low** | Medium | Mitigated with JSON.stringify; eliminate with MV3 migration |
+
+### Recommended Priority
+
+1. **Immediate:** Fix Obsidian URI encoding, dead code, implicit global in pageContext.js, run `eslint --fix`
+2. **Short-term:** Add test framework (Jest/Vitest) with unit tests for core functions
+3. **Medium-term:** Plan Manifest V3 migration (eliminates executeScript concern); replace Moment.js with dayjs
