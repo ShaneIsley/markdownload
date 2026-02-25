@@ -1,8 +1,7 @@
 
 // default variables
-var selectedText = null;
-var imageList = null;
-var mdClipsFolder = '';
+let imageList = null;
+let mdClipsFolder = '';
 
 const darkMode = window.matchMedia('(prefers-color-scheme: dark)').matches;
 // set up event handlers
@@ -13,13 +12,13 @@ const cm = CodeMirror.fromTextArea(document.getElementById("md"), {
 });
 cm.on("cursorActivity", (cm) => {
     const somethingSelected = cm.somethingSelected();
-    var a = document.getElementById("downloadSelection");
+    const a = document.getElementById("downloadSelection");
 
     if (somethingSelected) {
-        if(a.style.display != "block") a.style.display = "block";
+        if(a.style.display !== "block") a.style.display = "block";
     }
     else {
-        if(a.style.display != "none") a.style.display = "none";
+        if(a.style.display !== "none") a.style.display = "none";
     }
 });
 document.getElementById("download").addEventListener("click", download);
@@ -105,7 +104,7 @@ const clipSite = id => {
         .then((result) => {
             if (result && result[0]) {
                 showOrHideClipOption(result[0].selection);
-                let message = {
+                const message = {
                     type: "clip",
                     dom: result[0].dom,
                     selection: result[0].selection
@@ -159,8 +158,7 @@ browser.storage.sync.get(defaultOptions).then(options => {
         active: true
     });
 }).then((tabs) => {
-    var id = tabs[0].id;
-    var url = tabs[0].url;
+    const id = tabs[0].id;
     browser.tabs.executeScript(id, {
         file: "/browser-polyfill.min.js"
     })
@@ -182,13 +180,13 @@ browser.runtime.onMessage.addListener(notify);
 
 //function to send the download message to the background page
 function sendDownloadMessage(text) {
-    if (text != null) {
+    if (text !== null) {
 
         return browser.tabs.query({
             currentWindow: true,
             active: true
         }).then(tabs => {
-            var message = {
+            const message = {
                 type: "download",
                 markdown: text,
                 title: document.getElementById("title").value,

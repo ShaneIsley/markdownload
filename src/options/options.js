@@ -177,7 +177,7 @@ const refereshElements = () => {
 
     show(document.getElementById("linkReferenceStyle"), (options.linkStyle === "referenced"));
 
-    show(document.getElementById("imageRefOptions"), (!options.imageStyle.startsWith("obsidian") && options.imageStyle != "noImage"));
+    show(document.getElementById("imageRefOptions"), (!options.imageStyle.startsWith("obsidian") && options.imageStyle !== "noImage"));
 
     show(document.getElementById("fence"), (options.codeBlockStyle === "fenced"));
 
@@ -197,12 +197,12 @@ const inputChange = e => {
     console.log('inputChange');
 
     if (e) {
-        let key = e.target.name;
+        const key = e.target.name;
         let value = e.target.value;
         if (key === "import-file") {
             fr = new FileReader();
             fr.onload = (ev) => {
-                let lines = ev.target.result;
+                const lines = ev.target.result;
                 options = JSON.parse(lines);
                 setCurrentChoice(options);
                 browser.contextMenus.removeAll()
@@ -239,11 +239,11 @@ const buttonClick = (e) => {
     else if (e.target.id === "export") {
         console.log("export");
         const json = JSON.stringify(options, null, 2);
-        var blob = new Blob([json], { type: "text/json" });
-        var url = URL.createObjectURL(blob);
-        var d = new Date();
+        const blob = new Blob([json], { type: "text/json" });
+        const url = URL.createObjectURL(blob);
+        const d = new Date();
 
-        var datestring = d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+        const datestring = d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
         browser.downloads.download({
             url: url,
             saveAs: true,
@@ -282,13 +282,13 @@ document.querySelectorAll(".input-sizer > textarea").forEach(el => el.addEventLi
 function getCheckedValue(radioObj) {
     if (!radioObj)
         return "";
-    var radioLength = radioObj.length;
+    const radioLength = radioObj.length;
     if (radioLength === undefined)
         if (radioObj.checked)
             return radioObj.value;
         else
             return "";
-    for (var i = 0; i < radioLength; i++) {
+    for (let i = 0; i < radioLength; i++) {
         if (radioObj[i].checked) {
             return radioObj[i].value;
         }
@@ -303,12 +303,12 @@ function getCheckedValue(radioObj) {
 function setCheckedValue(radioObj, newValue) {
     if (!radioObj)
         return;
-    var radioLength = radioObj.length;
+    const radioLength = radioObj.length;
     if (radioLength === undefined) {
         radioObj.checked = (radioObj.value === newValue.toString());
         return;
     }
-    for (var i = 0; i < radioLength; i++) {
+    for (let i = 0; i < radioLength; i++) {
         radioObj[i].checked = false;
         if (radioObj[i].value === newValue.toString()) {
             radioObj[i].checked = true;

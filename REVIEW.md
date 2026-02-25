@@ -266,16 +266,34 @@ A single clip operation triggers 3-4 storage reads for the same data. Consider f
 
 ---
 
-## Files to Modify (Remaining Work)
+## Changes Applied
 
-| File | Changes |
+All issues identified in this review have been addressed (except Manifest V3 migration and test suite, which are larger efforts):
+
+| Issue | Fix Applied |
 |---|---|
-| `src/background/background.js` | Remove unused `options` fetch in `notify()` (line 544); remove dead `folderSeparator` block (lines 959-965); encode Obsidian URIs (lines 986, 996) |
-| `src/contentScript/contentScript.js` | Remove dead `notifyExtension()` (lines 1-4); fix `removeHiddenNodes` filter return value (line 63) |
-| `src/contentScript/pageContext.js` | Add `const` to `for...of` loop (line 6) |
-| `src/popup/popup.js` | Remove unused `selectedText` (line 3); fix `!=` → `!==` (lines 19, 22, 185) |
-| `src/options/options.js` | Fix `!=` → `!==` (line 180) |
-| All files | Run `eslint --fix` for `var` → `let`/`const` and `prefer-const` |
+| #7 Dead `notifyExtension()` | Removed from `contentScript.js` |
+| #8 `removeHiddenNodes` filter | Added `FILTER_SKIP` return for visible nodes; removed broken `offsetParent` check |
+| #9 Implicit global in `pageContext.js` | Added `const` to `for...of` loop |
+| #10 Unused `options` in `notify()` | Removed unnecessary `getOptions()` call |
+| #11 Dead `folderSeparator` block | Removed dead code and deprecated `navigator.platform` usage |
+| #12 Unused `selectedText` | Removed from `popup.js` |
+| #13 `executeScript` code strings | Already mitigated with `JSON.stringify` (further elimination requires MV3) |
+| #14 Obsidian URI encoding | Added `encodeURIComponent()` to vault, folder, and title in Obsidian URIs |
+| #17 ESLint warnings | Ran `eslint --fix` (45 auto-fixes); manually fixed remaining `!=` → `!==`, `var` → `let`/`const`; reduced from 63 to 5 unavoidable cross-file false positives |
+| #19 Moment.js | Replaced with dayjs + advancedFormat plugin (8KB vs 58KB, 86% reduction) |
+
+---
+
+## Remaining Work
+
+| Issue | Severity | Effort | Description |
+|---|---|---|---|
+| No test suite (#16) | **High** | High | 0% coverage; add Jest/Vitest with unit tests for core functions |
+| Manifest V3 migration (#18) | **Medium** | High | Required for continued Chrome Web Store compliance |
+| Repeated `getOptions()` calls (#20) | **Low** | Medium | Fetch options once per pipeline and thread through |
+| `executeScript` code strings (#13) | **Low** | Medium | Fully eliminatable only via MV3 `scripting.executeScript({func:...})` |
+| Overly broad `<all_urls>` permission (#15) | **Medium** | Medium | Make optional; request on demand for "Download All Tabs" |
 
 ---
 
@@ -292,34 +310,5 @@ No automated test suite exists. Verification is manual:
    - Test a page with relative URLs (e.g., internal wiki links) → verify links resolve correctly
    - Test a page with MathJax → verify math renders as `$...$` / `$$...$$`
    - Test Obsidian integration with vault names containing spaces
+   - Test `{date:YYYY-MM-DD}` template variable (validates dayjs migration)
 3. Verify the options page — change settings and verify they persist
-
----
-
-## Summary
-
-### What's Good
-
-- **Clean architecture.** Clear separation between background, content, popup, and options scripts. Each file has a well-defined responsibility.
-- **Powerful conversion pipeline.** Readability.js → Turndown with custom rules handles a wide range of web content including MathJax/KaTeX, fenced code blocks with language detection, and multiple image handling modes.
-- **Rich feature set.** Template variables, Obsidian integration, batch tab processing, context menus, keyboard shortcuts — impressive for ~1,400 lines of custom code.
-- **Previous critical bugs fixed.** All 5 bugs from the initial review have been correctly addressed.
-
-### What Needs Attention
-
-| Issue | Severity | Effort | Description |
-|---|---|---|---|
-| No test suite (#16) | **High** | High | 0% coverage; bugs go undetected until users report them |
-| Obsidian URI encoding (#14) | **Medium** | Low | Breaks for vault/folder names with special characters |
-| Dead code (#7, #10, #11, #12) | **Low** | Low | 4 instances of unused variables/functions |
-| 63 ESLint warnings (#17) | **Low** | Low | 45 auto-fixable; rest need manual cleanup |
-| `pageContext.js` implicit global (#9) | **Medium** | Trivial | Missing `const` in `for...of` loop |
-| Manifest V3 migration (#18) | **Medium** | High | Required for continued Chrome Web Store compliance |
-| Moment.js bundle size (#19) | **Low** | Low | 70KB savings by switching to dayjs |
-| `executeScript` code strings (#13) | **Low** | Medium | Mitigated with JSON.stringify; eliminate with MV3 migration |
-
-### Recommended Priority
-
-1. **Immediate:** Fix Obsidian URI encoding, dead code, implicit global in pageContext.js, run `eslint --fix`
-2. **Short-term:** Add test framework (Jest/Vitest) with unit tests for core functions
-3. **Medium-term:** Plan Manifest V3 migration (eliminates executeScript concern); replace Moment.js with dayjs

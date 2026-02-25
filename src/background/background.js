@@ -17,13 +17,13 @@ function turndown(content, options, article) {
   if (options.turndownEscape) TurndownService.prototype.escape = TurndownService.prototype.defaultEscape;
   else TurndownService.prototype.escape = s => s;
 
-  var turndownService = new TurndownService(options);
+  const turndownService = new TurndownService(options);
 
   turndownService.use(turndownPluginGfm.gfm)
 
   turndownService.keep(['iframe', 'sub', 'sup', 'u', 'ins', 'del', 'small', 'big']);
 
-  let imageList = {};
+  const imageList = {};
   // add an image rule
   turndownService.addRule('images', {
     filter: function (node, tdopts) {
@@ -31,7 +31,7 @@ function turndown(content, options, article) {
       if (node.nodeName === 'IMG' && node.getAttribute('src')) {
         
         // get the original src
-        let src = node.getAttribute('src')
+        const src = node.getAttribute('src')
         // set the new src
         node.setAttribute('src', validateUri(src, article.baseURI));
         
@@ -77,12 +77,12 @@ function turndown(content, options, article) {
       else if (options.imageStyle.startsWith('obsidian')) return `![[${node.getAttribute('src')}]]`;
       // otherwise, output the normal markdown link
       else {
-        var alt = cleanAttribute(node.getAttribute('alt'));
-        var src = node.getAttribute('src') || '';
-        var title = cleanAttribute(node.getAttribute('title'));
-        var titlePart = title ? ' "' + title + '"' : '';
+        const alt = cleanAttribute(node.getAttribute('alt'));
+        const src = node.getAttribute('src') || '';
+        const title = cleanAttribute(node.getAttribute('title'));
+        const titlePart = title ? ' "' + title + '"' : '';
         if (options.imageRefStyle === 'referenced') {
-          var id = this.references.length + 1;
+          const id = this.references.length + 1;
           this.references.push('[fig' + id + ']: ' + src + titlePart);
           return '![' + alt + '][fig' + id + ']';
         }
@@ -91,7 +91,7 @@ function turndown(content, options, article) {
     },
     references: [],
     append: function (options) {
-      var references = '';
+      let references = '';
       if (this.references.length) {
         references = '\n\n' + this.references.join('\n') + '\n\n';
         this.references = []; // Reset references
@@ -249,7 +249,7 @@ function getImageFilename(src, options, prependFilePath = true) {
     filename = 'image.' + filename.substring(0, filename.indexOf(';'));
   }
   
-  let extension = filename.substring(filename.lastIndexOf('.'));
+  const extension = filename.substring(filename.lastIndexOf('.'));
   if (extension === filename) {
     // there is no extension, so we need to figure one out
     // for now, give it an 'idunno' extension and we'll process it later
@@ -289,7 +289,7 @@ function textReplace(string, article, disallowedChars = null) {
   if (matches && matches.forEach) {
     matches.forEach(match => {
       const format = match.substring(6, match.length - 1);
-      const dateString = moment(now).format(format);
+      const dateString = dayjs(now).format(format);
       string = string.replaceAll(match, dateString);
     });
   }
@@ -350,9 +350,9 @@ function generateValidFileName(title, disallowedChars = null) {
   if (!title) return title;
   else title = title + '';
   // remove < > : " / \ | ? * 
-  var illegalRe = /[\/\?<>\\:\*\|":]/g;
+  const illegalRe = /[\/\?<>\\:\*\|":]/g;
   // and non-breaking spaces (thanks @Licat)
-  var name = title.replace(illegalRe, "").replace(new RegExp('\u00A0', 'g'), ' ')
+  let name = title.replace(illegalRe, "").replace(new RegExp('\u00A0', 'g'), ' ')
       // collapse extra whitespace
       .replace(new RegExp(/\s+/, 'g'), ' ')
       // remove leading/trailing whitespace that can cause issues when using {pageTitle} in a download path
@@ -370,7 +370,7 @@ function generateValidFileName(title, disallowedChars = null) {
 
 async function preDownloadImages(imageList, markdown) {
   const options = await getOptions();
-  let newImageList = {};
+  const newImageList = {};
   // originally, I was downloading the markdown file first, then all the images
   // however, in some cases we need to download images *first* so we can get the
   // proper file extension to put into the markdown.
@@ -386,7 +386,7 @@ async function preDownloadImages(imageList, markdown) {
           const blob = xhr.response;
 
           if (options.imageStyle === 'base64') {
-            var reader = new FileReader();
+            const reader = new FileReader();
             reader.onloadend = function () {
               markdown = markdown.replaceAll(src, reader.result)
               resolve()
@@ -541,7 +541,6 @@ function base64EncodeUnicode(str) {
 
 //function that handles messages from the injected script into the site
 async function notify(message) {
-  const options = await getOptions();
   // message for initial clipping of the dom
   if (message.type === "clip") {
     // get the article info from the passed in dom
@@ -831,7 +830,7 @@ async function getArticleFromContent(tabId, selection = false) {
 
 // function to apply the title template
 async function formatTitle(article) {
-  let options = await getOptions();
+  const options = await getOptions();
   
   let title = textReplace(options.title, article, options.disallowedChars + '/');
   title = title.split('/').map(s=>generateValidFileName(s, options.disallowedChars)).join('/');
@@ -839,7 +838,7 @@ async function formatTitle(article) {
 }
 
 async function formatMdClipsFolder(article) {
-  let options = await getOptions();
+  const options = await getOptions();
 
   let mdClipsFolder = '';
   if (options.mdClipsFolder && options.downloadMode === 'downloadsApi') {
@@ -852,7 +851,7 @@ async function formatMdClipsFolder(article) {
 }
 
 async function formatObsidianFolder(article) {
-  let options = await getOptions();
+  const options = await getOptions();
 
   let obsidianFolder = '';
   if (options.obsidianFolder) {
@@ -956,14 +955,6 @@ async function copyMarkdownFromContext(info, tab) {
   try{
     await ensureScripts(tab.id);
 
-    const platformOS = navigator.platform;
-    var folderSeparator = "";
-    if(platformOS.indexOf("Win") === 0){
-      folderSeparator = "\\";
-    }else{
-      folderSeparator = "/";
-    }
-
     if (info.menuItemId === "copy-markdown-link") {
       const options = await getOptions();
       options.frontmatter = options.backmatter = '';
@@ -983,7 +974,7 @@ async function copyMarkdownFromContext(info, tab) {
       const obsidianFolder = await formatObsidianFolder(article);
       const { markdown } = await convertArticleToMarkdown(article, downloadImages = false);
       await browser.tabs.executeScript(tab.id, { code: `copyToClipboard(${JSON.stringify(markdown)})` });
-      await chrome.tabs.update({url: "obsidian://advanced-uri?vault=" + obsidianVault + "&clipboard=true&mode=new&filepath=" + obsidianFolder + generateValidFileName(title)});
+      await chrome.tabs.update({url: `obsidian://advanced-uri?vault=${encodeURIComponent(obsidianVault)}&clipboard=true&mode=new&filepath=${encodeURIComponent(obsidianFolder + generateValidFileName(title))}`});
     }
     else if(info.menuItemId === "copy-markdown-obsall") {
       const article = await getArticleFromContent(tab.id, info.menuItemId === "copy-markdown-obsall");
@@ -993,7 +984,7 @@ async function copyMarkdownFromContext(info, tab) {
       const obsidianFolder = await formatObsidianFolder(article);
       const { markdown } = await convertArticleToMarkdown(article, downloadImages = false);
       await browser.tabs.executeScript(tab.id, { code: `copyToClipboard(${JSON.stringify(markdown)})` });
-      await browser.tabs.update({url: "obsidian://advanced-uri?vault=" + obsidianVault + "&clipboard=true&mode=new&filepath=" + obsidianFolder + generateValidFileName(title)});
+      await browser.tabs.update({url: `obsidian://advanced-uri?vault=${encodeURIComponent(obsidianVault)}&clipboard=true&mode=new&filepath=${encodeURIComponent(obsidianFolder + generateValidFileName(title))}`});
     }
     else {
       const article = await getArticleFromContent(tab.id, info.menuItemId === "copy-markdown-selection");
